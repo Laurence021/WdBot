@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WD 機器人服務運作流程</title>
+<style>
+  /* 版面：左側目錄＋右側文件欄；窄螢幕時目錄收在上方。字型只用本機字型，離線也能正常顯示 */
+  :root {
+    --bg: #f5f7fa;
+    --surface: #ffffff;
+    --fg: #18212c;
+    --muted: #556273;
+    --line: #d9e0e8;
+    --accent: #1f5fa8;
+    --accent-soft: #e4eef9;
+    --warn: #b4531d;
+    --warn-soft: #fbece2;
+    --font-body: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+    --font-mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #11161d;
+      --surface: #18202a;
+      --fg: #e3e9f0;
+      --muted: #9aa8b8;
+      --line: #2b3643;
+      --accent: #7fb2ec;
+      --accent-soft: #1d2f45;
+      --warn: #f0a173;
+      --warn-soft: #3a2519;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #11161d;
+    --surface: #18202a;
+    --fg: #e3e9f0;
+    --muted: #9aa8b8;
+    --line: #2b3643;
+    --accent: #7fb2ec;
+    --accent-soft: #1d2f45;
+    --warn: #f0a173;
+    --warn-soft: #3a2519;
+    color-scheme: dark;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 16px 80px;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 48px;
+  }
+
+  header.intro { grid-column: 1 / -1; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 36px);
+    line-height: 1.3;
+    margin: 6px 0 12px;
+    text-wrap: balance;
+  }
+  .intro p { color: var(--muted); max-width: 68ch; margin: 0; }
+
+  nav.toc { position: sticky; top: 24px; align-self: start; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  nav.toc a {
+    display: flex;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  nav.toc a span { font-family: var(--font-mono); color: var(--accent); min-width: 1.2em; }
+  nav.toc a:hover, nav.toc a:focus-visible { background: var(--accent-soft); color: var(--fg); outline: none; }
+
+  main { min-width: 0; display: grid; gap: 56px; }
+  section { min-width: 0; display: grid; gap: 16px; scroll-margin-top: 24px; }
+  h2 {
+    font-size: 22px;
+    line-height: 1.4;
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    text-wrap: balance;
+  }
+  h2 .num { font-family: var(--font-mono); font-size: 15px; color: var(--accent); font-weight: 500; }
+  section > p, section > ul { margin: 0; max-width: 72ch; }
+  ul { padding-left: 1.3em; display: grid; gap: 6px; }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--accent-soft);
+    color: var(--fg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    word-break: break-word;
+  }
+
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px;
+    overflow-x: auto;
+  }
+  .diagram pre.mermaid { margin: 0; background: transparent; text-align: center; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-weight: 500; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .callout {
+    border-left: 3px solid var(--warn);
+    background: var(--warn-soft);
+    padding: 12px 16px;
+    border-radius: 0 8px 8px 0;
+    max-width: 72ch;
+  }
+  .callout strong { color: var(--warn); }
+
+  .states { display: flex; flex-wrap: wrap; gap: 8px; }
+  .state {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .state.ok { border-color: var(--accent); color: var(--accent); }
+  .state.bad { border-color: var(--warn); color: var(--warn); }
+
+  h3 { font-size: 16px; margin: 8px 0 0; }
+
+  .offline-note { display: none; color: var(--muted); font-size: 13px; }
+  .no-mermaid .offline-note { display: block; }
+
+  @media (max-width: 860px) {
+    .page { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 24px 16px 64px; }
+    nav.toc { position: static; }
+    nav.toc ol { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="intro">
+    <div class="eyebrow">WdBot.Service · .NET 10</div>
+    <h1>WD 機器人服務運作流程</h1>
+    <p>依照目前的程式碼整理。機器人服務從 BOT 管理後台微服務取得設定，自動登入 WD 遊戲、維持聊天連線，把玩家私訊轉給微服務，再依微服務的指令私訊玩家；也能回報公頻線上名單，並確保一個廳只有一個機器人。</p>
+    <p class="offline-note">流程圖需要連網才能顯示成圖；目前無法載入繪圖元件，所以顯示的是流程圖原始碼。</p>
+  </header>
+
+  <nav class="toc" aria-label="目錄">
+    <ol>
+      <li><a href="#arch"><span>1</span>系統架構</a></li>
+      <li><a href="#startup"><span>2</span>啟動與設定下發</a></li>
+      <li><a href="#lifecycle"><span>3</span>單一機器人生命週期</a></li>
+      <li><a href="#chat"><span>4</span>聊天連線與一廳一機器人</a></li>
+      <li><a href="#dm"><span>5</span>私訊收發</a></li>
+      <li><a href="#scan"><span>6</span>公頻名單掃描</a></li>
+      <li><a href="#token"><span>7</span>token 與 API 錯誤處理</a></li>
+      <li><a href="#backend"><span>8</span>與微服務斷線時</a></li>
+      <li><a href="#params"><span>9</span>重要參數</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <section id="arch">
+      <h2><span class="num">01</span>系統架構</h2>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  MS["BOT 管理後台微服務"]
+  subgraph SVC["機器人服務 WdBot.Service"]
+    BL["WebSocketBackendLink&lt;br/&gt;微服務連線"]
+    BM["BotManager&lt;br/&gt;依設定啟停機器人"]
+    CR["ChannelRegistry&lt;br/&gt;哪個廳由哪個機器人佔用"]
+    subgraph BI["BotInstance（每個機器人一個）"]
+      GS["GameSession&lt;br/&gt;登入與 token"]
+      CS["ChatSupervisor&lt;br/&gt;聊天連線與重連"]
+      PS["PrivateMessageSender&lt;br/&gt;私訊送出佇列"]
+      SC["ChannelMemberScanner&lt;br/&gt;公頻名單翻頁"]
+    end
+  end
+  API["WD App API（HTTPS）"]
+  WS["WD 聊天 WS（WSS）"]
+  MS &lt;-->|"WebSocket"| BL
+  BL --> BM
+  BM --> BI
+  BI &lt;--> CR
+  GS --> API
+  CS &lt;--> WS
+  PS --> CS
+  SC --> CS
+</pre></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>元件</th><th>職責</th></tr></thead>
+          <tbody>
+            <tr><td><code>WebSocketBackendLink</code></td><td>主動連線微服務；接收設定與送訊指令；回報私訊、送出結果、狀態、公頻名單</td></tr>
+            <tr><td><code>BotManager</code></td><td>依設定新增、停止、重啟機器人；把 <code>message.send</code> 轉給對應的機器人</td></tr>
+            <tr><td><code>ChannelRegistry</code></td><td>記錄每個公頻由哪個機器人佔用，確保一廳一機器人</td></tr>
+            <tr><td><code>BotInstance</code></td><td>單一機器人的完整生命週期，串起下面四個元件</td></tr>
+            <tr><td><code>GameSession</code></td><td>帳密登入、刷新 token、API 回 2029 時自動刷新後重送</td></tr>
+            <tr><td><code>ChatSupervisor</code></td><td>維持聊天 WS 連線：斷線重連、輪替網址、依踢線原因決定是否重連</td></tr>
+            <tr><td><code>PrivateMessageSender</code></td><td>依序送出私訊：200 字拆段、間隔 2.1 秒、太快時重試</td></tr>
+            <tr><td><code>ChannelMemberScanner</code></td><td>用 opcode 9 翻完公頻所有分頁</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="startup">
+      <h2><span class="num">02</span>啟動與設定下發</h2>
+      <div class="diagram"><pre class="mermaid">
+flowchart TD
+  A["服務啟動"] --> B["連線微服務&lt;br/&gt;Header 帶 X-Api-Key"]
+  B -->|"失敗"| B1["等 1–30 秒重連"]
+  B1 --> B
+  B -->|"成功"| C["送 hello"]
+  C --> D["重送所有機器人的最新狀態"]
+  D --> E["微服務送 config.sync"]
+  E --> F{"逐一比對每個 bot_id"}
+  F -->|"不在清單中"| G["停止並移除"]
+  F -->|"enabled 為 false"| G
+  F -->|"設定欄位缺漏或帳號重複"| H["回報 error"]
+  F -->|"新的 bot_id"| I["建立機器人並啟動"]
+  F -->|"帳號類欄位變更，或先前已停止"| J["停止舊的，重新啟動"]
+  F -->|"只改 auto_mark_read 或 scan_channel_players"| K["直接套用，不重新登入"]
+</pre></div>
+      <ul>
+        <li>帳號類欄位：env、account、password、device_id、device_model、os、app_version。變更任一項都會重新登入</li>
+        <li>同一個 env 下，同一個帳號只能給一個機器人，否則兩條聊天連線會互相踢線</li>
+        <li>之後微服務可以用 <code>config.upsert</code>、<code>config.remove</code> 單筆調整，規則相同</li>
+      </ul>
+    </section>
+
+    <section id="lifecycle">
+      <h2><span class="num">03</span>單一機器人生命週期</h2>
+      <div class="states" aria-label="機器人狀態">
+        <span class="state">starting</span>
+        <span class="state">logging_in</span>
+        <span class="state">connecting</span>
+        <span class="state ok">online</span>
+        <span class="state">reconnecting</span>
+        <span class="state">waiting_channel</span>
+        <span class="state">stopped</span>
+        <span class="state bad">error</span>
+      </div>
+      <div class="diagram"><pre class="mermaid">
+flowchart TD
+  S["starting"] --> L["logging_in&lt;br/&gt;帳號密碼登入"]
+  L -->|"致命錯誤碼"| ERR["error：停止"]
+  L --> P["取得本人資料 getPlayerInfo"]
+  P --> C{"聊天權限開啟？"}
+  C -->|"否"| ERR
+  C -->|"是"| R["同時執行"]
+  R --> T["每 50 分鐘主動刷新 token"]
+  R --> W["聊天連線（第 4 節）"]
+  T -->|"重新登入也失敗"| ERR
+  W -->|"被踢：7002、7003、7004、7006"| ERR
+  T -->|"暫時性錯誤"| RT["reconnecting&lt;br/&gt;等 5 秒起，每次加倍，最多 300 秒"]
+  W -->|"暫時性錯誤"| RT
+  RT --> L
+</pre></div>
+      <ul>
+        <li>登入的致命錯誤碼：2001 參數驗證失敗（帳號密碼格式不符）、2002 帳號找不到、2003 登入失敗、2023 密碼錯誤太多次、2024 預約刪除中、2041 帳號密碼不吻合、2045 帳號無法使用、4038 停權</li>
+        <li>進入 <code>error</code> 後機器人就停止。後台修正設定後，對同一個 bot_id 再送一次 <code>config.upsert</code>，就會重新啟動</li>
+        <li>送私訊時要帶的暱稱、頭像、頭像框、對話框 ID，都從登入與本人資料取得</li>
+        <li>等級 0（沒綁手機）的帳號不會停止：照樣登入、進公頻、收私訊、掃描名單，online 狀態的 detail 會註明無法發言；送私訊時遊戲端會回 5008</li>
+      </ul>
+    </section>
+
+    <section id="chat">
+      <h2><span class="num">04</span>聊天連線與一廳一機器人</h2>
+      <div class="diagram"><pre class="mermaid">
+flowchart TD
+  A["連聊天 WS&lt;br/&gt;chat_ws_url?token=access_token"] -->|"失敗"| A1["換下一條網址、刷新 token&lt;br/&gt;等 1–60 秒（維護中至少 120 秒）"]
+  A1 --> A
+  A -->|"成功"| B["收到 opcode 7&lt;br/&gt;已加入公頻，取得 channel_id"]
+  B --> C{"這個廳已經有&lt;br/&gt;其他機器人？"}
+  C -->|"沒有"| D["佔用此廳&lt;br/&gt;回報 online 與 channel_id"]
+  D --> E{"有開啟&lt;br/&gt;scan_channel_players？"}
+  E -->|"是"| F["掃描公頻名單（第 6 節）"]
+  E -->|"否"| G["收發私訊"]
+  F --> G
+  C -->|"有：撞廳"| H{"已連續撞廳 10 次？"}
+  H -->|"否"| I["斷線，5–7.5 秒後重連"]
+  I --> A
+  H -->|"是"| J["waiting_channel&lt;br/&gt;下線 300 秒後重新嘗試"]
+  J --> A
+  G --> K{"連線結束原因"}
+  K -->|"一般斷線"| K1["釋放廳，1 秒起退避重連"]
+  K -->|"7000 同帳號在別處連線"| K2["釋放廳，等 300 秒"]
+  K -->|"7001 強制踢出"| K3["釋放廳，等 30 秒"]
+  K -->|"7005 維護"| K4["釋放廳，等 120 秒"]
+  K -->|"7002、7003、7004、7006"| K5["error：停止"]
+  K1 --> A
+  K2 --> A
+  K3 --> A
+  K4 --> A
+</pre></div>
+      <ul>
+        <li>公頻由遊戲伺服器隨機分配，無法自選，也沒有離開公頻的指令。撞廳時只能斷線重連，讓伺服器重新分配</li>
+        <li>撞廳重試期間仍可收私訊；<code>waiting_channel</code> 期間處於下線狀態，私訊收不到，<code>message.send</code> 會回 <code>-2</code></li>
+        <li>可以在 <code>appsettings.json</code> 設 <code>Bot:OneBotPerChannel = false</code> 關閉這個機制</li>
+      </ul>
+      <div class="callout"><strong>兩個前提：</strong>佔廳的對照表只存在單一服務程序中，所以只能執行一個機器人服務實例；另外，重連後伺服器要確實可能分到不同的廳，這點需要向遊戲方確認。</div>
+    </section>
+
+    <section id="dm">
+      <h2><span class="num">05</span>私訊收發</h2>
+      <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant P as 玩家
+  participant WS as WD 聊天 WS
+  participant B as 機器人
+  participant M as 微服務
+  P->>WS: 私訊機器人
+  WS->>B: opcode 2 推送
+  Note over B: 略過自己發的訊息&lt;br/&gt;依 message_id 去重
+  B->>M: message.received
+  B-->>WS: opcode 6 已讀（auto_mark_read 開啟時）
+  M->>B: message.send（request_id、to_player_id、text）
+  Note over B: 放入送出佇列&lt;br/&gt;超過 200 字拆成多則
+  loop 每一則
+    Note over B: 與上一則間隔至少 2.1 秒
+    B->>WS: opcode 2（帶 trace_id、暱稱、頭像、對話框）
+    WS-->>B: 同 trace_id 的回包（最多等 10 秒）
+    alt 回 5007 或 2044
+      Note over B: 退避後重試，每則最多 4 次
+    end
+  end
+  B->>M: message.send_result（success、message_ids 或 err_code）
+  WS->>P: 玩家收到訊息
+</pre></div>
+      <ul>
+        <li>回覆玩家和主動私訊都用 <code>message.send</code>；主動私訊只是不帶 <code>reply_to_message_id</code></li>
+        <li>機器人沒有連線時，送出佇列最多等 30 秒，仍未恢復就回 <code>-2</code></li>
+        <li>等待回包逾時（<code>-3</code>），或等待時斷線（<code>-6</code>），都無法確定訊息是否送達，所以不會自動重送，交給微服務判斷</li>
+      </ul>
+    </section>
+
+    <section id="scan">
+      <h2><span class="num">06</span>公頻名單掃描</h2>
+      <p>只有 <code>scan_channel_players</code> 為 true、而且佔到廳的機器人才會掃描。</p>
+      <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant B as 機器人
+  participant WS as WD 聊天 WS
+  participant M as 微服務
+  WS->>B: 連線後主動推送 opcode 7（已加入公頻）與 opcode 9（成員列表第一頁），順序不固定
+  Note over B: 確認佔到廳後處理推送的第一頁
+  opt next_cursor 不是空字串（超過 100 人）
+    B->>WS: opcode 9（帶 cursor，每頁間隔 200 毫秒）
+    WS-->>B: 下一頁，直到 next_cursor 為空字串
+  end
+  WS->>B: 取得名單期間收到 opcode 17
+  Note over B: 先暫存
+  B->>M: channel.snapshot（完整名單，不含自己）
+  B->>M: 補送暫存的 channel.members_changed
+  WS->>B: opcode 17（伺服器每 3 秒彙整一次）
+  B->>M: channel.members_changed（joined、left）
+  M->>B: message.send（微服務決定要私訊誰）
+  opt 遊戲方再次推送 opcode 9
+    B->>M: channel.snapshot（以新名單取代）
+  end
+  opt 超過 10 分鐘沒收到 opcode 9 推送（Bot:ChannelRescanMinutes）
+    B->>WS: opcode 9 從第一頁主動掃描
+    B->>M: channel.snapshot（新的完整名單）
+  end
+</pre></div>
+      <ul>
+        <li>名單以遊戲方推送為主：連線後伺服器會主動推送 opcode 9（第一頁），機器人不另外送請求；只有超過 100 人（next_cursor 不是空字串）時，才主動要剩下的頁面湊成完整名單。之後靠 opcode 17 維護增減</li>
+        <li>超過 10 分鐘（<code>Bot:ChannelRescanMinutes</code>，0 表示關閉）都沒收到 opcode 9 推送，才主動從第一頁掃描一次</li>
+        <li>每次重連都會重新建立名單，因為重連後可能換到別的廳。微服務收到新的 snapshot 時，應該取代該機器人的舊名單</li>
+        <li>機器人自己也以「完整名單＋增減」維護目前在線名單，log 會印出目前在線人數；名單同時寫成實體檔，檔名依大廳編號區分：<code>logs/roster/{env}/channel-{大廳編號}.json</code>，可以直接打開查看；離開或換廳時刪除舊大廳的檔案（<code>Bot:WriteRosterFile</code>，預設開啟）</li>
+        <li>掃描失敗時不送 snapshot，<code>bot.status</code> 維持 online 並在 detail 說明原因，之後照常回報成員異動</li>
+        <li>要私訊誰、是否已經私訊過，都由微服務判斷，機器人不記錄</li>
+      </ul>
+    </section>
+
+    <section id="token">
+      <h2><span class="num">07</span>token 與 API 錯誤處理</h2>
+      <div class="diagram"><pre class="mermaid">
+flowchart TD
+  A["呼叫 App API&lt;br/&gt;每 60 秒最多 190 次"] --> B{"error_code"}
+  B -->|"1000"| OK["成功"]
+  B -->|"2044 呼叫太頻繁"| C["等 retry_after_seconds 後重試&lt;br/&gt;最多 3 次"]
+  C --> A
+  B -->|"2029 token 失效"| D["用 refresh_token 刷新"]
+  D -->|"成功"| E["用新 token 重送一次"]
+  D -->|"網路逾時"| D1["50 秒內以同一個 refresh_token 重送&lt;br/&gt;最多 4 次"]
+  D1 --> D
+  D -->|"2029、4079、2003、2001"| F["重新帳密登入"]
+  F -->|"成功"| E
+  F -->|"致命錯誤碼"| G["error：停止機器人"]
+  B -->|"其他錯誤碼"| H["拋出錯誤，交給上層處理"]
+</pre></div>
+      <ul>
+        <li>access_token 有效 1 小時，程式每 50 分鐘主動刷新一次</li>
+        <li>聊天 WS 只在建立連線時驗證 token，所以 token 更新不會讓已建立的聊天連線斷線</li>
+      </ul>
+    </section>
+
+    <section id="backend">
+      <h2><span class="num">08</span>與微服務斷線時</h2>
+      <div class="diagram"><pre class="mermaid">
+flowchart TD
+  A["與微服務斷線"] --> B["機器人在遊戲中照常運作"]
+  B --> C["私訊、送出結果、公頻名單&lt;br/&gt;放入上行佇列，上限 10,000 則&lt;br/&gt;滿了丟棄最舊的"]
+  B --> D["狀態只保留每個機器人的最新一筆"]
+  A --> E["1 秒起退避重連，最多 30 秒"]
+  E --> F["重連成功，送 hello"]
+  F --> G["重送所有機器人的最新狀態"]
+  G --> H["補送佇列中的訊息"]
+  F --> I["微服務再送一次 config.sync"]
+</pre></div>
+      <ul>
+        <li>斷線期間微服務送不了 <code>message.send</code>，所以機器人無法回覆玩家</li>
+        <li>機器人服務重啟時，佇列中還沒送出的私訊會遺失</li>
+      </ul>
+    </section>
+
+    <section id="params">
+      <h2><span class="num">09</span>重要參數</h2>
+      <h3>appsettings.json 可調整</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>設定</th><th>預設</th><th>說明</th></tr></thead>
+          <tbody>
+            <tr><td><code>Backend:Url</code></td><td class="num">ws://localhost:5080/…</td><td>微服務 WebSocket 網址（目前是佔位值）</td></tr>
+            <tr><td><code>Backend:ApiKey</code></td><td class="num">空</td><td>連線時帶的 X-Api-Key</td></tr>
+            <tr><td><code>Backend:OutboxCapacity</code></td><td class="num">10000</td><td>斷線期間的上行佇列上限</td></tr>
+            <tr><td><code>Bot:TokenRefreshIntervalMinutes</code></td><td class="num">50</td><td>主動刷新 token 的間隔（分鐘）</td></tr>
+            <tr><td><code>Bot:DuplicateLoginCooldownSeconds</code></td><td class="num">300</td><td>被 7000 踢線後等多久重連</td></tr>
+            <tr><td><code>Bot:MaintenanceBackoffSeconds</code></td><td class="num">120</td><td>維護中（7005）等多久重連</td></tr>
+            <tr><td><code>Bot:ChatReconnectMaxSeconds</code></td><td class="num">60</td><td>聊天重連的最長等待</td></tr>
+            <tr><td><code>Bot:SendReplyTimeoutSeconds</code></td><td class="num">10</td><td>送私訊後等回包的時間</td></tr>
+            <tr><td><code>Bot:SendQueueCapacity</code></td><td class="num">1000</td><td>每個機器人的送出佇列上限</td></tr>
+            <tr><td><code>Bot:RestartMaxDelaySeconds</code></td><td class="num">300</td><td>暫時性錯誤後重新登入的最長等待</td></tr>
+            <tr><td><code>Bot:OneBotPerChannel</code></td><td class="num">true</td><td>是否啟用一廳一機器人</td></tr>
+            <tr><td><code>Bot:ChannelCollisionMaxAttempts</code></td><td class="num">10</td><td>連續撞廳幾次後下線等待</td></tr>
+            <tr><td><code>Bot:ChannelCollisionRetrySeconds</code></td><td class="num">5</td><td>撞廳後隔幾秒重連（另加 0–50% 隨機）</td></tr>
+            <tr><td><code>Bot:ChannelWaitingRetrySeconds</code></td><td class="num">300</td><td>下線等待多久再試</td></tr>
+            <tr><td><code>FileLogging:Directory</code></td><td class="num">logs</td><td>一般 log 的資料夾（每天一個檔案）</td></tr>
+            <tr><td><code>FileLogging:MessageDirectory</code></td><td class="num">logs/messages</td><td>訊息內容 log 的資料夾，依 bot_id 分子資料夾（私訊 messages-*.log、公頻 channel-*.log）</td></tr>
+            <tr><td><code>Logging:LogLevel:WdBot.Messages.Private</code></td><td class="num">Information（本機測試為 Debug）</td><td>設為 Debug 才會寫私訊內容 log；log 輸出位置、格式與保留天數（30 天）見 nlog.config</td></tr>
+            <tr><td><code>Logging:LogLevel:WdBot.Messages.Channel</code></td><td class="num">Information（本機測試為 Debug）</td><td>設為 Debug 才會寫公頻內容 log，可與私訊分開開關</td></tr>
+            <tr><td><code>Bot:ChannelRescanMinutes</code></td><td class="num">10</td><td>超過幾分鐘沒收到遊戲方推送的 opcode 9，才主動掃描一次公頻名單；0 表示不主動掃描</td></tr>
+            <tr><td><code>Game:UnityVersion</code></td><td class="num">2022.3.20f1</td><td>真的 App 使用的 Unity 版本，用在 Header 的 {unity_version}；要以抓到的封包為準</td></tr>
+            <tr><td><code>Game:RequestHeaders</code></td><td class="num">模擬 Unity 安卓 App</td><td>送給遊戲方的 Header（App API 與聊天 WS），詳見 README</td></tr>
+            <tr><td><code>Bot:WriteRosterFile</code></td><td class="num">true</td><td>是否把在線名單寫到 logs/roster/{env}/channel-{大廳編號}.json</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>依遊戲規格寫在程式中的固定值</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>項目</th><th>值</th><th>依據</th></tr></thead>
+          <tbody>
+            <tr><td>App API 頻率</td><td class="num">190 次／60 秒</td><td>規格上限 200 次，保留餘量</td></tr>
+            <tr><td>私訊間隔</td><td class="num">2.1 秒</td><td>規格每 2 秒 1 則</td></tr>
+            <tr><td>私訊單則長度</td><td class="num">200 字</td><td>規格上限 200 字</td></tr>
+            <tr><td>公頻翻頁間隔</td><td class="num">200 毫秒</td><td>規格每條連線每秒最多 50 則指令</td></tr>
+            <tr><td>聊天單則訊息上限</td><td class="num">256 KB</td><td>規格上限</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 流程圖由 Mermaid 繪製，需要連網載入；離線時顯示流程圖原始碼，文字內容不受影響 -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+  (function () {
+    if (!window.mermaid) {
+      document.documentElement.classList.add("no-mermaid");
+      return;
+    }
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "default", securityLevel: "strict" });
+  })();
+</script>
+</body>
+</html>

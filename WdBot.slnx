@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WdBot.Backend/WdBot.Backend.csproj" />
+    <Project Path="src/WdBot.Game/WdBot.Game.csproj" />
+    <Project Path="src/WdBot.Service/WdBot.Service.csproj" />
+  </Folder>
+</Solution>
