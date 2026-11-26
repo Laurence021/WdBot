@@ -15,17 +15,35 @@ namespace WdBot.Service;
 [Target(TypeName)]
 public sealed class TemplateColoredConsoleTarget : Target
 {
+    /// <summary>在 nlog.config 使用的 target 類型名稱（xsi:type）。</summary>
     public const string TypeName = "WdColoredConsole";
 
+    /// <summary>時間、類別的顏色。</summary>
     private const ConsoleColor SecondaryText = ConsoleColor.Gray;
+
+    /// <summary>訊息中固定文字的顏色。</summary>
     private const ConsoleColor Text = ConsoleColor.White;
+
+    /// <summary>字串參數的顏色。</summary>
     private const ConsoleColor StringValue = ConsoleColor.Cyan;
+
+    /// <summary>數字參數的顏色。</summary>
     private const ConsoleColor NumberValue = ConsoleColor.Magenta;
-    private const ConsoleColor KeywordValue = ConsoleColor.Blue; // true／false、null
+
+    /// <summary>true／false 與 null 的顏色。</summary>
+    private const ConsoleColor KeywordValue = ConsoleColor.Blue;
+
+    /// <summary>其他型別參數（列舉、時間、物件）的顏色。</summary>
     private const ConsoleColor OtherValue = ConsoleColor.Green;
 
+    /// <summary>一段要輸出的文字與它的顏色；顏色為 null 表示使用主控台預設顏色。</summary>
+    /// <param name="Text">文字。</param>
+    /// <param name="Foreground">文字顏色。</param>
+    /// <param name="Background">背景顏色。</param>
     private readonly record struct Segment(string Text, ConsoleColor? Foreground, ConsoleColor? Background = null);
 
+    /// <summary>把一筆 log 組成「時間 [等級] 類別: 訊息」並分段上色輸出；有例外時換行接著輸出例外內容。</summary>
+    /// <param name="logEvent">要輸出的 log。</param>
     protected override void Write(NLog.LogEventInfo logEvent)
     {
         var segments = new List<Segment>(16)
@@ -55,6 +73,7 @@ public sealed class TemplateColoredConsoleTarget : Target
     /// 依範本順序取出參數值。從 Microsoft.Extensions.Logging 進來的 log，參數放在 MessageTemplateParameters（Parameters 為 null）；
     /// 直接用 NLog 記錄的 log 則可能只有 Parameters。
     /// </summary>
+    /// <param name="logEvent">要取出參數的 log。</param>
     private static object?[]? GetParameterValues(NLog.LogEventInfo logEvent)
     {
         try
@@ -73,6 +92,8 @@ public sealed class TemplateColoredConsoleTarget : Target
         return logEvent.Parameters;
     }
 
+    /// <summary>等級標籤的文字與顏色：TRC／DBG 灰色、INF 白色、WRN 黃色、ERR／FTL 紅底白字。</summary>
+    /// <param name="level">log 等級。</param>
     private static (string Tag, ConsoleColor Foreground, ConsoleColor? Background) LevelStyle(NLog.LogLevel level)
     {
         if (level == NLog.LogLevel.Trace) return ("TRC", SecondaryText, null);
@@ -87,6 +108,9 @@ public sealed class TemplateColoredConsoleTarget : Target
     /// 逐字掃描訊息範本，固定文字與參數值分段上色。參數依出現順序對應 parameters（與 Microsoft.Extensions.Logging 相同）。
     /// 支援 {名稱}、{名稱,對齊}、{名稱:格式}，以及 {{、}} 跳脫。範本與參數數量對不上時回傳 false，segments 不變。
     /// </summary>
+    /// <param name="segments">輸出：分段結果會加到這裡。</param>
+    /// <param name="template">訊息範本；可為 null。</param>
+    /// <param name="parameters">參數值，依範本中出現的順序；可為 null。</param>
     private static bool TryAppendTemplate(List<Segment> segments, string? template, object?[]? parameters)
     {
         if (template is null)
@@ -183,6 +207,8 @@ public sealed class TemplateColoredConsoleTarget : Target
     /// 參數值轉成文字並決定顏色。結果與 Microsoft.Extensions.Logging 格式化的相同（它用 InvariantCulture），
     /// 所以主控台與檔案 log 的內容一致。
     /// </summary>
+    /// <param name="value">參數值；可為 null。</param>
+    /// <param name="format">範本中 {名稱:格式} 的格式字串；沒有時為 null。</param>
     private static (string Text, ConsoleColor Color) FormatValue(object? value, string? format)
     {
         var culture = CultureInfo.InvariantCulture;
@@ -207,9 +233,15 @@ public sealed class TemplateColoredConsoleTarget : Target
         }
     }
 
+    /// <summary>值轉成文字：IFormattable 套用格式與文化設定，其他用 ToString()。</summary>
+    /// <param name="value">要轉換的值。</param>
+    /// <param name="format">格式字串；沒有時為 null。</param>
+    /// <param name="culture">格式化用的文化設定。</param>
     private static string ToText(object value, string? format, CultureInfo culture) =>
         value is IFormattable formattable ? formattable.ToString(format, culture) : value.ToString() ?? "";
 
+    /// <summary>逐段設定顏色並寫到主控台，最後還原顏色並換行；輸出被導向時只寫純文字。</summary>
+    /// <param name="segments">要輸出的文字段落。</param>
     private static void Output(List<Segment> segments)
     {
         if (Console.IsOutputRedirected)

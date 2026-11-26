@@ -7,9 +7,13 @@ using Microsoft.Extensions.Logging;
 namespace WdBot.Game.Chat;
 
 /// <summary>建立聊天 WS 失敗（token 無效時伺服器不升級連線；維護中時回 HTTP JSON）。</summary>
+/// <param name="message">錯誤說明。</param>
+/// <param name="statusCode">伺服器回應的 HTTP 狀態碼。</param>
+/// <param name="inner">原始例外。</param>
 public sealed class ChatConnectException(string message, HttpStatusCode statusCode, Exception inner)
     : Exception(message, inner)
 {
+    /// <summary>升級連線時伺服器回應的 HTTP 狀態碼；沒有回應時為 0。</summary>
     public HttpStatusCode StatusCode { get; } = statusCode;
 }
 
@@ -17,9 +21,12 @@ public sealed class ChatConnectException(string message, HttpStatusCode statusCo
 public sealed class ChatDisconnectedException() : Exception("聊天 WS 已斷線");
 
 /// <summary>送出後在時限內沒有收到同 trace_id 的回包。</summary>
+/// <param name="opcode">等待逾時的指令 opcode。</param>
 public sealed class ChatTimeoutException(int opcode) : Exception($"聊天 WS opcode {opcode} 等待回應逾時");
 
 /// <summary>連線結束的原因。KickCode 有值代表被 opcode 8 踢下線。</summary>
+/// <param name="KickCode">opcode 8 的踢線代碼；不是被踢線時為 null。</param>
+/// <param name="Message">結束原因的說明；可為 null。</param>
 public sealed record ChatCloseInfo(int? KickCode, string? Message);
 
 /// <summary>
@@ -28,16 +35,31 @@ public sealed record ChatCloseInfo(int? KickCode, string? Message);
 /// </summary>
 public sealed class ChatWsClient : IAsyncDisposable
 {
+    /// <summary>單則訊息上限（規格 256 KB），收到超過的訊息就結束連線。</summary>
     private const int MaxMessageBytes = 256 * 1024;
 
+    /// <summary>底層的 WebSocket 連線。</summary>
     private readonly ClientWebSocket _ws = new();
+
+    /// <summary>確保同一時間只有一個送出動作（WebSocket 不允許同時送出）。</summary>
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+
+    /// <summary>等待回包的請求，以 trace_id 對應。</summary>
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ChatDownPacket>> _pending = new();
+
+    /// <summary>trace_id 的前綴（bot_id）。</summary>
     private readonly string _tracePrefix;
+
+    /// <summary>記錄連線與封包處理的錯誤。</summary>
     private readonly ILogger _logger;
+
+    /// <summary>trace_id 的流水號。</summary>
     private long _sequence;
 
+    /// <summary>建立聊天 WS 用戶端；建構時不會連線，要呼叫 <see cref="ConnectAsync"/>。</summary>
+    /// <param name="tracePrefix">trace_id 的前綴，實際的 trace_id 為「前綴-流水號」。</param>
     /// <param name="headers">連線請求帶上的額外 Header（例如模擬 Unity App 的 User-Agent）。</param>
+    /// <param name="logger">記錄連線與封包處理的錯誤。</param>
     public ChatWsClient(string tracePrefix, RequestHeaders headers, ILogger logger)
     {
         _tracePrefix = tracePrefix;
@@ -49,8 +71,13 @@ public sealed class ChatWsClient : IAsyncDisposable
     /// <summary>沒有對應到等待中 trace_id 的推送（新私訊、公頻訊息、成員異動等）。</summary>
     public event Action<ChatDownPacket>? PushReceived;
 
+    /// <summary>連線是否開啟中。</summary>
     public bool IsOpen => _ws.State == WebSocketState.Open;
 
+    /// <summary>以 {chat_ws_url}?token={access_token} 建立連線；失敗時拋出 <see cref="ChatConnectException"/>。</summary>
+    /// <param name="chatWsUrl">聊天 WS 網址（登入回傳的 chat_ws_urls 之一）。</param>
+    /// <param name="accessToken">目前的 access_token，帶在網址的 token 參數。</param>
+    /// <param name="ct">用來取消連線。</param>
     public async Task ConnectAsync(string chatWsUrl, string accessToken, CancellationToken ct)
     {
         var builder = new UriBuilder(chatWsUrl);
@@ -71,6 +98,11 @@ public sealed class ChatWsClient : IAsyncDisposable
     /// 送出指令。awaitReply 為 true 時等待同 trace_id 的回包（發送者本人會收到同 opcode 的推送）。
     /// 回包帶 err_code 時不拋例外，由呼叫端判斷。
     /// </summary>
+    /// <param name="opcode">指令代碼，見 <see cref="ChatOpcodes"/>。</param>
+    /// <param name="data">指令的 data：字串原樣送出，物件序列化成 JSON 字串，null 送空字串。</param>
+    /// <param name="awaitReply">是否等待同 trace_id 的回包。</param>
+    /// <param name="timeout">等待回包的時限；awaitReply 為 false 時不使用。</param>
+    /// <param name="ct">用來取消送出與等待。</param>
     public async Task<ChatDownPacket?> SendAsync(int opcode, object? data, bool awaitReply, TimeSpan timeout, CancellationToken ct)
     {
         var traceId = $"{_tracePrefix}-{Interlocked.Increment(ref _sequence)}";
@@ -126,6 +158,7 @@ public sealed class ChatWsClient : IAsyncDisposable
     }
 
     /// <summary>讀取直到連線結束，回傳結束原因。</summary>
+    /// <param name="ct">取消時停止讀取。</param>
     public async Task<ChatCloseInfo> ReceiveLoopAsync(CancellationToken ct)
     {
         var buffer = new byte[16 * 1024];
@@ -207,6 +240,7 @@ public sealed class ChatWsClient : IAsyncDisposable
         }
     }
 
+    /// <summary>嘗試正常關閉連線（最多等 3 秒）並釋放 WebSocket。</summary>
     public async ValueTask DisposeAsync()
     {
         if (_ws.State is WebSocketState.Open or WebSocketState.CloseReceived)

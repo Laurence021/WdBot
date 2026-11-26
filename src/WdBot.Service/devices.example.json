@@ -1,0 +1,16 @@
+{
+  "devices": [
+    {
+      "device_id": "7fd54b59a9966232bd228a75256fe5e4",
+      "device_model": 1,
+      "device_type": "Samsung SM-A546E",
+      "os": "Android 15"
+    },
+    {
+      "device_id": "53f7066a9eff90d9859aa4b74df65a2f",
+      "device_model": 1,
+      "device_type": "Samsung SM-A5560",
+      "os": "Android 15"
+    }
+  ]
+}

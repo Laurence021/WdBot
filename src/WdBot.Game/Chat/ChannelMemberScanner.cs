@@ -5,13 +5,23 @@ namespace WdBot.Game.Chat;
 /// <summary>透過聊天 WS opcode 9 翻頁取得目前所在公頻的完整線上名單（每頁 100 人）。</summary>
 public sealed class ChannelMemberScanner
 {
+    /// <summary>最多翻幾頁（每頁 100 人），避免伺服器異常時無限翻頁。</summary>
     private const int MaxPages = 200;
+
+    /// <summary>每一頁最多嘗試幾次。</summary>
     private const int MaxAttemptsPerPage = 2;
+
+    /// <summary>翻頁間隔，避免超過聊天 WS 每秒 50 則指令的限制。</summary>
     private static readonly TimeSpan PageInterval = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>等待每一頁回應的逾時時間。</summary>
     private static readonly TimeSpan PageTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>記錄翻頁結果與重試。</summary>
     private readonly ILogger _logger;
 
+    /// <summary>建立掃描器。</summary>
+    /// <param name="logger">記錄翻頁結果與重試。</param>
     public ChannelMemberScanner(ILogger logger)
     {
         _logger = logger;
@@ -22,6 +32,9 @@ public sealed class ChannelMemberScanner
     /// firstPage 不為 null 時（遊戲方主動推送的第一頁），直接用它當第一頁，只向伺服器要之後的頁面。
     /// 失敗時拋出例外。
     /// </summary>
+    /// <param name="client">目前的聊天 WS 連線，用來送出 opcode 9。</param>
+    /// <param name="firstPage">遊戲方主動推送的第一頁；null 時從第一頁開始向伺服器要。</param>
+    /// <param name="ct">用來取消翻頁。</param>
     public async Task<ChannelSnapshot> ScanAsync(ChatWsClient client, ChannelMembersPage? firstPage, CancellationToken ct)
     {
         var players = new Dictionary<long, ChannelMember>();
@@ -67,6 +80,11 @@ public sealed class ChannelMemberScanner
         return new ChannelSnapshot(last!.ChannelId, last.ChannelName, last.OnlineCount, last.TotalCount, players.Values.ToList());
     }
 
+    /// <summary>送出 opcode 9 取得一頁並等待回包；失敗或逾時會重試一次，仍失敗就拋出例外。</summary>
+    /// <param name="client">目前的聊天 WS 連線。</param>
+    /// <param name="cursor">上一頁回傳的 next_cursor；第一頁為空字串。</param>
+    /// <param name="page">第幾頁（從 1 開始），用於錯誤訊息。</param>
+    /// <param name="ct">用來取消作業。</param>
     private async Task<ChannelMembersPage> FetchPageAsync(ChatWsClient client, string cursor, int page, CancellationToken ct)
     {
         // 第一頁 data 送空字串，之後帶 {"cursor": "..."}

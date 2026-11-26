@@ -40,6 +40,13 @@ else
 // 一廳一機器人的對照表，只在本程序內有效（請只執行一個機器人服務實例）
 builder.Services.AddSingleton<ChannelRegistry>();
 
+// device id 清單：BOT 設定沒有 device_id 時從這裡隨機分配（相對路徑以 content root 為準）
+var devicePoolOptions = builder.Configuration.GetSection("DevicePool").Get<DevicePoolOptions>() ?? new DevicePoolOptions();
+builder.Services.AddSingleton(sp => new DevicePool(
+    LoggingSetup.ResolvePath(builder.Environment.ContentRootPath, devicePoolOptions.File),
+    devicePoolOptions.MaxBotsPerDevice,
+    sp.GetRequiredService<ILogger<DevicePool>>()));
+
 builder.Services.AddHostedService<BotManager>();
 
 var host = builder.Build();

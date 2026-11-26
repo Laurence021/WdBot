@@ -20,9 +20,35 @@
 | `Backend` | 微服務 WebSocket 網址、API key、服務實例 ID |
 | `Game:Environments` | 正式站與測試站的 API 和聊天 WS 網址 |
 | `Game:RequestHeaders`、`Game:UnityVersion` | 送給遊戲方的 Header，讓請求看起來像 Unity 做的安卓 App（見下方說明） |
+| `DevicePool` | device id 清單檔的位置，以及每個 device_id 最多給幾個機器人使用（見下方說明） |
 | `Bot` | token 刷新間隔、重連與逾時參數 |
 
 機器人帳號由微服務下發，不寫在設定檔中。
+
+### device id 清單
+
+BOT 設定（微服務下發或 bots.local.json）沒有填 `device_id` 時，機器人服務會從 device id 清單隨機分配一個給它。
+
+- 清單檔預設為 `src/WdBot.Service/devices.json`，可在 `DevicePool:File` 修改，格式見 `devices.example.json`：
+
+  ```json
+  {
+    "devices": [
+      { "device_id": "7fd54b59a9966232bd228a75256fe5e4", "device_model": 1, "device_type": "Samsung SM-A546E", "os": "Android 15" }
+    ]
+  }
+  ```
+
+- 每一筆代表一支手機。`device_model`、`device_type`、`os` 為選填，有填就取代 BOT 設定的值，沒填則沿用 BOT 設定。共用同一個 device_id 的機器人，看起來就像同一支手機登入多個帳號
+- `DevicePool:MaxBotsPerDevice`：同一個 device_id 最多同時給幾個機器人，預設 1
+- 分配規則：
+  - 從還有名額的裝置中隨機挑一個
+  - 同一個服務執行期間固定不變，機器人重新登入或設定變更都沿用同一個；**服務重啟後會重新隨機分配**
+  - 機器人被移除（後台移除、不在全量設定中）時釋放名額；只是停用（`enabled` 為 false）則保留
+  - BOT 設定自己有填 `device_id` 時，直接使用，不從清單分配，但仍佔用該 device_id 的名額
+- 名額用完時，機器人不會啟動，`bot.status` 回報 error 並說明原因。之後清單加了裝置或有名額釋放出來，要再送一次該機器人的設定（或修改 bots.local.json 存檔）才會重新嘗試
+- 清單檔修改後不需要重啟服務，下次分配時會自動重新讀取；已分配的不受影響
+- `devices.json` 已加入 `.gitignore`，不進版控
 
 ### 送給遊戲方的 Header
 
@@ -42,6 +68,7 @@ Content-Type: application/json
   - `{app_version}`、`{os}`、`{device_id}`：來自機器人設定
   - `{android_version}`：從 os 取出的數字，例如 Android14 → 14
   - `{phone_model}`：機器人的 `phone_model`，沒填時用 `Game:DefaultPhoneModel`
+  - `{device_type}`：機器人的 `device_type`，沒填時為空字串
 - 值設成空字串表示不送這個 Header；每個機器人可以在 BOT 設定的 `headers` 覆寫同名 Header
 - **Unity 版本與 libcurl 版本要跟真的 App 一樣**：預設值只是常見的版本，請用手機抓真實 App 的封包比對，再修正 `Game:UnityVersion` 與 User-Agent
 - 請求內容一律帶 `Content-Length`，不用 chunked 傳送，跟手機 App 相同
@@ -60,13 +87,15 @@ dotnet run --project src/WdBot.Service
 
 後台還沒好之前，可以用本機 JSON 檔提供機器人設定，直接測試登入、進入公頻與接收私訊。所有狀態與收到的訊息都會印在主控台。
 
-1. 在 `src/WdBot.Service` 中，把 `bots.local.example.json` 複製成 `bots.local.json`
+1. 在 `src/WdBot.Service` 中，把 `bots.local.example.json` 複製成 `bots.local.json`，把 `devices.example.json` 複製成 `devices.json` 並填入要使用的裝置（見上方「device id 清單」）
 2. 填入測試站帳號：
 
    | 欄位 | 說明 |
    |---|---|
    | `account`、`password` | 測試站的遊戲帳號密碼 |
-   | `device_id` | 建議用 UUID，跟一般手機 App 相同，可用 PowerShell `[guid]::NewGuid()` 產生；Android（`device_model` 1）用小寫，iOS（`device_model` 2）用大寫。每個機器人固定一組，不要共用，也不要直接沿用範例的值；設定後不要再改（token 綁定 device_id，換了要重新登入，也會計入註冊次數） |
+   | `device_id` | 選填。一般不填，由 `devices.json` 隨機分配；要指定時建議用 UUID（可用 PowerShell `[guid]::NewGuid()` 產生，Android 用小寫、iOS 用大寫）。token 綁定 device_id，換了會重新登入 |
+   | `device_type` | 選填，裝置型號，例如 `Samsung SM-A546E`；會帶進登入 API，沒填時不送 |
+   | `location` | 選填，所在地區，例如 `Taipei District`；會帶進登入 API，沒填時不送 |
    | `app_version` | 遊戲目前的版本號（向遊戲方確認） |
    | `phone_model` | 選填，手機型號；只有 Header 設定用到 `{phone_model}` 時才有作用（Unity 預設的 Header 不含手機型號） |
    | `scan_channel_players` | true 時會印出公頻名單與成員進出 |

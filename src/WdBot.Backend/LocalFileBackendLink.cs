@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace WdBot.Backend;
 
+/// <summary>本機測試模式（<see cref="LocalFileBackendLink"/>）的設定。</summary>
 public sealed class LocalBackendOptions
 {
     /// <summary>機器人設定檔的完整路徑，格式同 config.sync 的 payload：{ "bots": [ ... ] }。</summary>
@@ -15,17 +16,27 @@ public sealed class LocalBackendOptions
 /// </summary>
 public sealed class LocalFileBackendLink : IBackendLink
 {
+    /// <summary>偵測到檔案變更後等待的時間，把編輯器存檔時連續觸發的多個事件合併成一次。</summary>
     private static readonly TimeSpan ReloadDebounce = TimeSpan.FromSeconds(1);
 
+    /// <summary>本機測試模式的設定。</summary>
     private readonly LocalBackendOptions _options;
+
+    /// <summary>記錄載入結果與所有回報內容。</summary>
     private readonly ILogger<LocalFileBackendLink> _logger;
 
+    /// <summary>建立本機測試用的連線。</summary>
+    /// <param name="options">本機測試設定，包含 BOT 設定檔的路徑（Backend:BotsFile）。</param>
+    /// <param name="logger">記錄設定檔載入結果與上報的內容。</param>
     public LocalFileBackendLink(LocalBackendOptions options, ILogger<LocalFileBackendLink> logger)
     {
         _options = options;
         _logger = logger;
     }
 
+    /// <summary>載入設定檔並交給 handler，之後監看檔案變更並重新套用，直到取消。</summary>
+    /// <param name="handler">接收設定的對象，通常是 BotManager。</param>
+    /// <param name="ct">取消時停止監看設定檔並結束。</param>
     public async Task RunAsync(IBackendHandler handler, CancellationToken ct)
     {
         var path = Path.GetFullPath(_options.BotsFile);
@@ -52,11 +63,14 @@ public sealed class LocalFileBackendLink : IBackendLink
         }
     }
 
-    // 私訊內容不寫進一般 log，只寫在依機器人分檔的私訊 log（Debug 等級才會寫）
+    /// <summary>收到私訊時寫進 log；私訊內容不寫進一般 log，只寫在依機器人分檔的私訊 log（Debug 等級才會寫）。</summary>
+    /// <param name="r">收到的玩家私訊。</param>
     public void ReportIncomingMessage(IncomingMessageReport r) =>
         _logger.LogInformation("[{Bot}] 收到私訊：玩家 {PlayerId}({Name}) message_id={MessageId}（message_type={Type}）",
             r.BotId, r.FromPlayerId, r.FromPlayerName, r.MessageId, r.MessageType);
 
+    /// <summary>私訊結果寫進 log：成功為 Information，失敗為 Warning。</summary>
+    /// <param name="r">私訊指令的執行結果。</param>
     public void ReportSendResult(SendResultReport r)
     {
         if (r.Success)
@@ -70,6 +84,8 @@ public sealed class LocalFileBackendLink : IBackendLink
         }
     }
 
+    /// <summary>公頻完整名單寫進 log（含所有玩家暱稱）。</summary>
+    /// <param name="r">公頻的完整線上名單。</param>
     public void ReportChannelSnapshot(ChannelSnapshotReport r)
     {
         var sample = string.Join("、", r.Players.Select(p => $"{p.PlayerName}"));
@@ -78,11 +94,15 @@ public sealed class LocalFileBackendLink : IBackendLink
             sample);
     }
 
+    /// <summary>公頻成員進出寫進 log（進入的玩家最多列 10 位）。</summary>
+    /// <param name="r">公頻成員進出的內容。</param>
     public void ReportChannelMembersChanged(ChannelMembersChangedReport r) =>
         _logger.LogInformation("[{Bot}] 公頻 {ChannelId} 成員異動：進入 {Joined} 人、離開 {Left} 人（在線 {Online}）{Names}",
             r.BotId, r.ChannelId, r.Joined.Count, r.Left.Count, r.OnlineCount,
             r.Joined.Count > 0 ? "，進入：" + string.Join("、", r.Joined.Take(10).Select(p => p.PlayerName)) : "");
 
+    /// <summary>機器人狀態寫進 log：Error 狀態用 Error 等級，其他用 Information。</summary>
+    /// <param name="r">機器人目前的狀態。</param>
     public void ReportBotStatus(BotStatusReport r)
     {
         var level = r.State == BotState.Error ? LogLevel.Error : LogLevel.Information;
@@ -91,6 +111,10 @@ public sealed class LocalFileBackendLink : IBackendLink
             string.IsNullOrEmpty(r.Detail) ? "" : "｜" + r.Detail + (r.ErrCode is { } code ? $"（{code}）" : ""));
     }
 
+    /// <summary>讀取並解析設定檔，以全量設定交給 handler；檔案不存在或格式錯誤時只記錄錯誤，不改變目前的機器人。</summary>
+    /// <param name="path">BOT 設定檔的完整路徑。</param>
+    /// <param name="handler">接收全量設定的對象。</param>
+    /// <param name="ct">用來取消作業。</param>
     private async Task LoadAndApplyAsync(string path, IBackendHandler handler, CancellationToken ct)
     {
         if (!File.Exists(path))
@@ -123,6 +147,9 @@ public sealed class LocalFileBackendLink : IBackendLink
         await handler.OnConfigSnapshotAsync(bots, ct).ConfigureAwait(false);
     }
 
+    /// <summary>以共用模式讀取整個檔案；檔案暫時被鎖住時每 200 毫秒重試，最多 5 次。</summary>
+    /// <param name="path">要讀取的檔案路徑。</param>
+    /// <param name="ct">用來取消作業，包含重試前的等待。</param>
     private static async Task<string> ReadWithRetryAsync(string path, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
@@ -140,6 +167,9 @@ public sealed class LocalFileBackendLink : IBackendLink
         }
     }
 
+    /// <summary>監看設定檔的新增、修改、刪除與更名，每次變更釋放一次 changed；資料夾不存在時回傳 null（不自動偵測）。</summary>
+    /// <param name="path">要監看的設定檔路徑。</param>
+    /// <param name="changed">檔案變更時釋放的號誌；讀取端等待它來得知檔案有變更。</param>
     private FileSystemWatcher? CreateWatcher(string path, SemaphoreSlim changed)
     {
         var directory = Path.GetDirectoryName(path);

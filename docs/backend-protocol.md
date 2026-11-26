@@ -89,9 +89,11 @@
 | env | string | | `prod` 正式站或 `test` 測試站，預設 `test` |
 | account | string | ✔ | 遊戲帳號 |
 | password | string | ✔ | 遊戲密碼 |
-| device_id | string | ✔ | 每個機器人**固定且唯一**；建議使用 UUID 格式，與一般手機 App 相同（Android 小寫、iOS 大寫）；token 綁定 device_id，任意更換會導致重新登入，並可能觸發遊戲端的註冊次數限制 |
+| device_id | string | | 選填。**一般不帶**，由機器人服務從 device id 清單隨機分配（連同清單中的 device_model、device_type、os），同一個服務執行期間固定不變；有帶時直接使用。token 綁定 device_id，任意更換會導致重新登入 |
 | device_model | int | | 1 Android、2 iOS、3 APK、4 官網，預設 1 |
-| os | string | ✔ | 例如 `Android14` |
+| os | string | | 例如 `Android14`；device id 清單有提供時以清單為準，兩邊都沒有時視為設定錯誤 |
+| device_type | string | | 選填。裝置型號，例如 `Samsung SM-A546E`；帶進登入 API，沒填時不送 |
+| location | string | | 選填。所在地區，例如 `Taipei District`；帶進登入 API，沒填時不送 |
 | app_version | string | ✔ | 遊戲 App 版本，例如 `1.2.0` |
 | phone_model | string | | 選填。手機型號，給 Header 設定中的 `{phone_model}` 變數使用；沒填時用機器人服務的預設值 |
 | headers | object | | 選填。這個機器人自己的 HTTP Header，例如 `{"User-Agent": "..."}`；同名時覆寫機器人服務的預設 Header，App API 與聊天 WS 都套用；值為空字串表示不送 |
@@ -100,7 +102,7 @@
 
 - 帳號需要**已綁定手機、等級 ≥ 1** 才能發言。等級 0 的帳號仍會登入、進公頻、收私訊、回報名單，`bot.status` 為 online 並在 detail 註明無法發言；送私訊時會收到失敗結果（5008）
 - 同一個 env 下，同一個 account 只能給一個 bot_id。遊戲端同帳號連兩條聊天連線會互相踢線，所以第二個會被拒絕並回報 `error`
-- 以下欄位變更時，機器人會重新登入：env、account、password、device_id、device_model、os、app_version、phone_model、headers。其他欄位會直接套用
+- 以下欄位變更時，機器人會重新登入：env、account、password、device_id、device_model、os、device_type、location、app_version、phone_model、headers。其他欄位會直接套用
 - 機器人因錯誤停止後，對同一個 bot_id 再送一次 `config.upsert`，就會重新啟動
 
 ### config.sync
@@ -116,9 +118,10 @@
         "env": "test",
         "account": "bot0001",
         "password": "Bot0001pass",
-        "device_id": "3f2b8c1e-7a4d-4e9b-9c1a-5d6e7f8a9b0c",
         "device_model": 1,
         "os": "Android14",
+        "device_type": "Samsung SM-A546E",
+        "location": "Taipei District",
         "app_version": "1.2.0",
         "auto_mark_read": true,
         "scan_channel_players": true

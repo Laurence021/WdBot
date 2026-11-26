@@ -43,6 +43,9 @@ public static class LoggingSetup
     public const string ConfigFileName = "nlog.config";
 
     /// <summary>以 NLog 取代預設的 log 輸出（主控台、EventLog 等）。</summary>
+    /// <param name="logging">主機的 log 設定。</param>
+    /// <param name="configuration">應用程式設定，從中讀取 FileLogging 區段。</param>
+    /// <param name="contentRoot">content root 路徑；相對的 log 資料夾以它為基準。</param>
     public static void Configure(ILoggingBuilder logging, IConfiguration configuration, string contentRoot)
     {
         var options = configuration.GetSection("FileLogging").Get<FileLoggingOptions>() ?? new FileLoggingOptions();
@@ -65,13 +68,19 @@ public static class LoggingSetup
     }
 
     /// <summary>訊息內容 log 用：帶上 BotId，讓 nlog.config 依機器人分檔。</summary>
+    /// <param name="logger">訊息內容 log 用的 logger。</param>
+    /// <param name="botId">機器人 ID。</param>
     public static IDisposable? BeginBotScope(ILogger logger, string botId) =>
         logger.BeginScope(new Dictionary<string, object> { [BotIdProperty] = SafeFolderName(botId) });
 
+    /// <summary>相對路徑以 content root 為基準轉成完整路徑；已經是完整路徑時原樣回傳。</summary>
+    /// <param name="contentRoot">content root 路徑。</param>
+    /// <param name="path">設定中的路徑，可為相對或完整路徑。</param>
     internal static string ResolvePath(string contentRoot, string path) =>
         Path.IsPathRooted(path) ? path : Path.Combine(contentRoot, path);
 
     /// <summary>bot_id 可能含有不能當資料夾名稱的字元，換成底線。</summary>
+    /// <param name="botId">機器人 ID。</param>
     internal static string SafeFolderName(string botId)
     {
         var invalid = Path.GetInvalidFileNameChars();

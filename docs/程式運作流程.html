@@ -262,7 +262,8 @@ flowchart TD
   F -->|"只改 auto_mark_read 或 scan_channel_players"| K["直接套用，不重新登入"]
 </pre></div>
       <ul>
-        <li>帳號類欄位：env、account、password、device_id、device_model、os、app_version。變更任一項都會重新登入</li>
+        <li>帳號類欄位：env、account、password、device_id、device_model、os、device_type、location、app_version、phone_model、headers。變更任一項都會重新登入</li>
+        <li>設定沒有 device_id 時，啟動前先從 device id 清單（devices.json）隨機分配；同一個服務執行期間固定不變，機器人被移除時釋放名額</li>
         <li>同一個 env 下，同一個帳號只能給一個機器人，否則兩條聊天連線會互相踢線</li>
         <li>之後微服務可以用 <code>config.upsert</code>、<code>config.remove</code> 單筆調整，規則相同</li>
       </ul>
@@ -482,6 +483,8 @@ flowchart TD
             <tr><td><code>Logging:LogLevel:WdBot.Messages.Private</code></td><td class="num">Information（本機測試為 Debug）</td><td>設為 Debug 才會寫私訊內容 log；log 輸出位置、格式與保留天數（30 天）見 nlog.config</td></tr>
             <tr><td><code>Logging:LogLevel:WdBot.Messages.Channel</code></td><td class="num">Information（本機測試為 Debug）</td><td>設為 Debug 才會寫公頻內容 log，可與私訊分開開關</td></tr>
             <tr><td><code>Bot:ChannelRescanMinutes</code></td><td class="num">10</td><td>超過幾分鐘沒收到遊戲方推送的 opcode 9，才主動掃描一次公頻名單；0 表示不主動掃描</td></tr>
+            <tr><td><code>DevicePool:File</code></td><td class="num">devices.json</td><td>device id 清單檔；BOT 設定沒有 device_id 時從這裡隨機分配</td></tr>
+            <tr><td><code>DevicePool:MaxBotsPerDevice</code></td><td class="num">1</td><td>同一個 device_id 最多同時給幾個機器人使用</td></tr>
             <tr><td><code>Game:UnityVersion</code></td><td class="num">2022.3.20f1</td><td>真的 App 使用的 Unity 版本，用在 Header 的 {unity_version}；要以抓到的封包為準</td></tr>
             <tr><td><code>Game:RequestHeaders</code></td><td class="num">模擬 Unity 安卓 App</td><td>送給遊戲方的 Header（App API 與聊天 WS），詳見 README</td></tr>
             <tr><td><code>Bot:WriteRosterFile</code></td><td class="num">true</td><td>是否把在線名單寫到 logs/roster/{env}/channel-{大廳編號}.json</td></tr>

@@ -6,35 +6,66 @@ using Microsoft.Extensions.Logging;
 
 namespace WdBot.Game.Chat;
 
+/// <summary>一筆待送出的私訊請求。</summary>
+/// <param name="RequestId">微服務的請求 ID，回報結果時帶回。</param>
+/// <param name="ToPlayerId">收訊玩家的 player_id。</param>
+/// <param name="Text">訊息內容；超過 200 字會自動分段。</param>
+/// <param name="ReplyToMessageId">要回覆（引用）的訊息 ID；只套用在第一段。</param>
 public sealed record OutgoingPrivateMessage(string RequestId, long ToPlayerId, string Text, string? ReplyToMessageId);
 
 /// <summary>
 /// 一筆私訊請求的結果。文字超過 200 字會拆成多則，MessageIds 依序列出已送出的訊息 ID。
 /// ErrCode 為負數表示本地錯誤，見 <see cref="LocalSendErrors"/>。
 /// </summary>
+/// <param name="RequestId">微服務私訊指令的 request_id。</param>
+/// <param name="Success">是否全部送出成功。</param>
+/// <param name="MessageIds">已送出的訊息 ID，依送出順序排列；失敗時為失敗前已送出的部分。</param>
+/// <param name="ErrCode">錯誤碼；成功時為 0，負數為本地錯誤。</param>
+/// <param name="ErrMsg">錯誤說明；成功時為 null。</param>
 public sealed record PrivateSendResult(
     string RequestId, bool Success, IReadOnlyList<string> MessageIds, int ErrCode, string? ErrMsg);
 
 /// <summary>私訊送出失敗時，不是由遊戲伺服器回應的本地錯誤碼。</summary>
 public static class LocalSendErrors
 {
+    /// <summary>參數錯誤，例如文字為空或玩家 ID 無效。</summary>
     public const int InvalidArgument = -1;
+
+    /// <summary>機器人沒有連線，等待後仍未恢復。</summary>
     public const int NotConnected = -2;
+
+    /// <summary>送出後等待回包逾時，無法確定是否送達。</summary>
     public const int Timeout = -3;
+
+    /// <summary>送出佇列已滿。</summary>
     public const int QueueFull = -4;
+
+    /// <summary>指定的機器人不存在或未啟用。</summary>
     public const int BotNotRunning = -5;
+
+    /// <summary>等待回包時連線中斷，無法確定是否送達。</summary>
     public const int DisconnectedUnknown = -6;
 }
 
+/// <summary><see cref="PrivateMessageSender"/> 的設定。</summary>
 public sealed class PrivateMessageSenderOptions
 {
     /// <summary>同一玩家私訊每 2 秒 1 則，加 100ms 餘量。</summary>
     public TimeSpan MinInterval { get; set; } = TimeSpan.FromMilliseconds(2100);
 
+    /// <summary>送出後等待回包的時間。</summary>
     public TimeSpan ReplyTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>沒有連線時最多等待多久，仍未恢復就回報失敗（-2）。</summary>
     public TimeSpan WaitConnectedTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>單則訊息的字數上限，超過就分段送出。</summary>
     public int MaxTextLength { get; set; } = 200;
+
+    /// <summary>每一段最多嘗試幾次（遇到 5007 發送太快時重試）。</summary>
     public int MaxAttemptsPerChunk { get; set; } = 4;
+
+    /// <summary>送出佇列的容量。</summary>
     public int QueueCapacity { get; set; } = 1000;
 }
 
@@ -43,14 +74,33 @@ public sealed class PrivateMessageSenderOptions
 /// </summary>
 public sealed class PrivateMessageSender
 {
+    /// <summary>提供目前的聊天連線。</summary>
     private readonly ChatSupervisor _chat;
+
+    /// <summary>取得機器人目前的外觀（暱稱、頭像、對話框）；尚未登入時回傳 null。</summary>
     private readonly Func<SenderProfile?> _profile;
+
+    /// <summary>每筆請求完成（成功或失敗）時呼叫，用來回報結果。</summary>
     private readonly Func<PrivateSendResult, Task> _onResult;
+
+    /// <summary>送出設定。</summary>
     private readonly PrivateMessageSenderOptions _options;
+
+    /// <summary>記錄送出結果與重試。</summary>
     private readonly ILogger _logger;
+
+    /// <summary>待送出的私訊佇列，由 <see cref="RunAsync"/> 依序取出。</summary>
     private readonly Channel<OutgoingPrivateMessage> _queue;
+
+    /// <summary>上一次送出的時間（Environment.TickCount64），用來維持送出間隔。</summary>
     private long _lastSendTick = Environment.TickCount64 - 10_000;
 
+    /// <summary>建立送出佇列；要呼叫 <see cref="RunAsync"/> 才會開始送出。</summary>
+    /// <param name="chat">聊天連線管理器，用來取得目前的連線。</param>
+    /// <param name="profile">取得機器人外觀（暱稱、頭像、對話框）的函式；還沒取得本人資料時回傳 null。</param>
+    /// <param name="onResult">每筆私訊處理完時呼叫，用來回報結果。</param>
+    /// <param name="options">佇列大小、送出間隔與重試參數。</param>
+    /// <param name="logger">記錄送出失敗與重試。</param>
     public PrivateMessageSender(ChatSupervisor chat, Func<SenderProfile?> profile, Func<PrivateSendResult, Task> onResult,
         PrivateMessageSenderOptions options, ILogger logger)
     {
@@ -67,8 +117,11 @@ public sealed class PrivateMessageSender
     }
 
     /// <summary>放進佇列；佇列已滿時回傳 false。</summary>
+    /// <param name="message">要送出的私訊。</param>
     public bool TryEnqueue(OutgoingPrivateMessage message) => _queue.Writer.TryWrite(message);
 
+    /// <summary>依序取出佇列中的私訊並送出，直到取消。</summary>
+    /// <param name="ct">取消時停止送出。</param>
     public async Task RunAsync(CancellationToken ct)
     {
         await foreach (var message in _queue.Reader.ReadAllAsync(ct).ConfigureAwait(false))
@@ -99,6 +152,9 @@ public sealed class PrivateMessageSender
         }
     }
 
+    /// <summary>送出一筆私訊請求：檢查參數、依長度分段，逐段帶上機器人外觀送出；任何一段失敗就停止並回報。</summary>
+    /// <param name="message">要送出的私訊請求。</param>
+    /// <param name="ct">用來取消作業。</param>
     private async Task<PrivateSendResult> SendOneAsync(OutgoingPrivateMessage message, CancellationToken ct)
     {
         if (message.ToPlayerId <= 0)
@@ -152,6 +208,14 @@ public sealed class PrivateMessageSender
         return new PrivateSendResult(message.RequestId, true, messageIds, 0, null);
     }
 
+    /// <summary>
+    /// 送出一段私訊並等待回包。遇到 5007／2044 或送出本身失敗時退避重試；
+    /// 已送出但逾時或斷線時不重送（可能已送達），直接回報失敗。成功時回傳回包，失敗時回傳失敗結果。
+    /// </summary>
+    /// <param name="message">這一段所屬的私訊請求。</param>
+    /// <param name="data">這一段要送出的內容。</param>
+    /// <param name="sentIds">先前已送出的訊息 ID，失敗時一併回報。</param>
+    /// <param name="ct">用來取消作業。</param>
     private async Task<(ChatDownPacket? Packet, PrivateSendResult? Failure)> SendChunkAsync(
         OutgoingPrivateMessage message, SendPrivateMessageData data, List<string> sentIds, CancellationToken ct)
     {
@@ -213,6 +277,8 @@ public sealed class PrivateMessageSender
         }
     }
 
+    /// <summary>距離上一次送出未滿 MinInterval 時，等到滿為止。</summary>
+    /// <param name="ct">用來取消等待。</param>
     private async Task WaitIntervalAsync(CancellationToken ct)
     {
         var elapsed = Environment.TickCount64 - Interlocked.Read(ref _lastSendTick);
@@ -223,6 +289,11 @@ public sealed class PrivateMessageSender
         }
     }
 
+    /// <summary>記錄失敗並建立失敗結果；sentIds 為失敗前已送出的訊息 ID。</summary>
+    /// <param name="message">失敗的私訊請求。</param>
+    /// <param name="sentIds">失敗前已送出的訊息 ID。</param>
+    /// <param name="code">錯誤碼；負數為本地錯誤，見 <see cref="LocalSendErrors"/>。</param>
+    /// <param name="reason">錯誤說明。</param>
     private PrivateSendResult Fail(OutgoingPrivateMessage message, IReadOnlyList<string> sentIds, int code, string? reason)
     {
         _logger.LogWarning("私訊 {RequestId} 送給玩家 {PlayerId} 失敗：{Code} {Reason}",
@@ -233,6 +304,8 @@ public sealed class PrivateMessageSender
     /// <summary>
     /// 去頭尾空白後依長度切段，不會切斷 emoji 等組合字元；全為空白的段落會被略過。
     /// </summary>
+    /// <param name="text">要切段的文字；null 視為空字串。</param>
+    /// <param name="maxLength">每段的長度上限。</param>
     public static List<string> SplitText(string? text, int maxLength)
     {
         var result = new List<string>();

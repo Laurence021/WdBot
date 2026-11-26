@@ -365,3 +365,4 @@ FodyWeavers.xsd
 # WdBot 本機設定：含帳號密碼與環境網址，不進版控
 /src/WdBot.Service/appsettings.Development.json
 /src/WdBot.Service/bots.local.json
+/src/WdBot.Service/devices.json
